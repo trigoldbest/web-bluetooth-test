@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web 藍牙連線測試器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 自定義捲動條樣式 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+
+    <div class="max-w-2xl mx-auto pt-12 px-4 sm:px-6 lg:px-8">
+        
+        <!-- Header -->
+        <div class="text-center mb-10">
+            <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight sm:text-4xl mb-2">
+                Web 藍牙裝置連線
+            </h1>
+            <p class="text-lg text-slate-600">
+                透過 Web Bluetooth API 掃描並連接附近的藍牙低功耗 (BLE) 裝置。
+            </p>
+        </div>
+
+        <!-- Main Card -->
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
+            <div class="p-8">
+                
+                <!-- Status Display -->
+                <div class="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+                    <div>
+                        <p class="text-sm font-medium text-slate-500 mb-1">目前狀態</p>
+                        <div class="flex items-center gap-3">
+                            <span id="statusIndicator" class="relative flex h-3 w-3">
+                              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-400 opacity-75 hidden" id="pingIndicator"></span>
+                              <span class="relative inline-flex rounded-full h-3 w-3 bg-slate-400" id="dotIndicator"></span>
+                            </span>
+                            <span id="statusText" class="text-xl font-bold text-slate-700">尚未連線</span>
+                        </div>
+                    </div>
+                    <div id="deviceNameContainer" class="hidden text-right">
+                        <p class="text-sm font-medium text-slate-500 mb-1">已連接裝置</p>
+                        <p id="deviceName" class="text-lg font-semibold text-blue-600">--</p>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row gap-4 mb-8">
+                    <button id="scanBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl shadow-sm transition duration-200 ease-in-out transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7 7 17"/><path d="M12 2v20"/><path d="M12 2 7 7h10l-5 5"/><path d="M12 22l5-5H7l5 5"/></svg>
+                        搜尋並連線裝置
+                    </button>
+                    
+                    <button id="disconnectBtn" class="hidden flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-semibold py-3 px-6 rounded-xl shadow-sm transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                        中斷連線
+                    </button>
+                </div>
+
+                <!-- Log Terminal -->
+                <div class="bg-slate-900 rounded-xl p-4 shadow-inner">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-mono text-slate-400 uppercase tracking-wider">系統日誌 (Console)</span>
+                        <button id="clearLogBtn" class="text-xs text-slate-500 hover:text-white transition">清除</button>
+                    </div>
+                    <div id="logBox" class="h-48 overflow-y-auto font-mono text-sm text-green-400 space-y-1">
+                        <!-- Logs will appear here -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        
+        <p class="text-center text-xs text-slate-400 mt-6">
+            請注意：Web Bluetooth API 需要在 HTTPS 環境下執行（或 localhost），且目前主要支援 Chrome / Edge / Android 瀏覽器。iOS Safari 尚未原生支援。
+        </p>
+    </div>
+
+    <script>
+        // DOM 元素
+        const scanBtn = document.getElementById('scanBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusText = document.getElementById('statusText');
+        const dotIndicator = document.getElementById('dotIndicator');
+        const pingIndicator = document.getElementById('pingIndicator');
+        const deviceNameContainer = document.getElementById('deviceNameContainer');
+        const deviceNameEl = document.getElementById('deviceName');
+        const logBox = document.getElementById('logBox');
+        const clearLogBtn = document.getElementById('clearLogBtn');
+
+        let bluetoothDevice = null;
+
+        // 檢查瀏覽器是否支援 Web Bluetooth
+        if (!navigator.bluetooth) {
+            log('警告：您的瀏覽器不支援 Web Bluetooth API。請使用最新版的 Chrome 或 Edge。', 'error');
+            scanBtn.disabled = true;
+            scanBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            statusText.textContent = '不支援的瀏覽器';
+        } else {
+            log('系統準備就緒。請點擊「搜尋並連線裝置」。', 'info');
+        }
+
+        // 綁定按鈕事件
+        scanBtn.addEventListener('click', onScanButtonClick);
+        disconnectBtn.addEventListener('click', onDisconnectButtonClick);
+        clearLogBtn.addEventListener('click', () => { logBox.innerHTML = ''; });
+
+        /**
+         * 處理掃描與連線請求
+         */
+        async function onScanButtonClick() {
+            try {
+                log('正在開啟藍牙裝置選擇器...', 'info');
+                
+                // 必須由使用者互動(Click)觸發此函數
+                // acceptAllDevices: true 表示列出所有附近的藍牙裝置
+                // optionalServices: 若後續需要讀寫特定資料，需在此處宣告 UUID
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['generic_access'] // 可選：加入你想要存取的服務 UUID
+                });
+
+                log(`已選擇裝置: ${bluetoothDevice.name || '未命名裝置'}`, 'success');
+                
+                // 監聽斷線事件
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                // 開始連線至 GATT 伺服器
+                connectToGattServer();
+
+            } catch (error) {
+                if (error.name === 'NotFoundError') {
+                    log('使用者取消了裝置選擇或未找到裝置。', 'warning');
+                } else {
+                    log(`請求裝置失敗: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        /**
+         * 連線至裝置的 GATT 伺服器
+         */
+        async function connectToGattServer() {
+            if (!bluetoothDevice) return;
+
+            updateUIState('connecting');
+            log('正在連接至 GATT 伺服器...', 'info');
+
+            try {
+                const server = await bluetoothDevice.gatt.connect();
+                log('連線成功！', 'success');
+                updateUIState('connected', bluetoothDevice.name);
+                
+                // --- 在這裡可以加入讀寫特定 Service / Characteristic 的程式碼 ---
+                // 例如: const service = await server.getPrimaryService('battery_service');
+                //       const characteristic = await service.getCharacteristic('battery_level');
+                //       const value = await characteristic.readValue();
+                // ---------------------------------------------------------------
+
+            } catch (error) {
+                log(`GATT 連線失敗: ${error.message}`, 'error');
+                updateUIState('disconnected');
+            }
+        }
+
+        /**
+         * 處理主動斷線
+         */
+        function onDisconnectButtonClick() {
+            if (!bluetoothDevice) return;
+            
+            log('正在中斷連線...', 'info');
+            if (bluetoothDevice.gatt.connected) {
+                bluetoothDevice.gatt.disconnect();
+            } else {
+                log('裝置已經處於斷線狀態。', 'warning');
+            }
+        }
+
+        /**
+         * 當裝置意外或主動斷線時觸發
+         */
+        function onDisconnected() {
+            log(`裝置 ${bluetoothDevice.name || '未命名裝置'} 已斷線。`, 'warning');
+            updateUIState('disconnected');
+        }
+
+        /**
+         * 更新畫面 UI 狀態
+         */
+        function updateUIState(state, name = '') {
+            switch(state) {
+                case 'connecting':
+                    statusText.textContent = '連線中...';
+                    statusText.className = 'text-xl font-bold text-yellow-600';
+                    dotIndicator.className = 'relative inline-flex rounded-full h-3 w-3 bg-yellow-500';
+                    pingIndicator.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75';
+                    pingIndicator.classList.remove('hidden');
+                    scanBtn.disabled = true;
+                    scanBtn.classList.add('opacity-70', 'cursor-not-allowed');
+                    break;
+                case 'connected':
+                    statusText.textContent = '已連線';
+                    statusText.className = 'text-xl font-bold text-emerald-600';
+                    dotIndicator.className = 'relative inline-flex rounded-full h-3 w-3 bg-emerald-500';
+                    pingIndicator.classList.add('hidden');
+                    
+                    deviceNameContainer.classList.remove('hidden');
+                    deviceNameEl.textContent = name || '未命名裝置';
+                    
+                    scanBtn.classList.add('hidden');
+                    disconnectBtn.classList.remove('hidden');
+                    break;
+                case 'disconnected':
+                default:
+                    statusText.textContent = '尚未連線';
+                    statusText.className = 'text-xl font-bold text-slate-700';
+                    dotIndicator.className = 'relative inline-flex rounded-full h-3 w-3 bg-slate-400';
+                    pingIndicator.classList.add('hidden');
+                    
+                    deviceNameContainer.classList.add('hidden');
+                    
+                    scanBtn.disabled = false;
+                    scanBtn.classList.remove('opacity-70', 'cursor-not-allowed', 'hidden');
+                    disconnectBtn.classList.add('hidden');
+                    break;
+            }
+        }
+
+        /**
+         * 日誌輸出輔助函數
+         */
+        function log(message, type = 'normal') {
+            const now = new Date();
+            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+            
+            const p = document.createElement('p');
+            
+            let colorClass = 'text-green-400';
+            let prefix = '>';
+            
+            if (type === 'error') {
+                colorClass = 'text-rose-400';
+                prefix = '[錯誤]';
+            } else if (type === 'warning') {
+                colorClass = 'text-yellow-400';
+                prefix = '[警告]';
+            } else if (type === 'success') {
+                colorClass = 'text-emerald-400';
+                prefix = '[成功]';
+            }
+
+            p.className = `${colorClass} break-all`;
+            p.innerHTML = `<span class="text-slate-500">[${timeStr}]</span> ${prefix} ${message}`;
+            
+            logBox.appendChild(p);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
