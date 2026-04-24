@@ -239,7 +239,7 @@
 
                 // 大多數這類感測器直接輸出的氣壓單位為 Pa，因此除以 100 轉換為 hPa (百帕)
                 // (如果顯示的數值異常，例如小了 100 倍，請將此處改為 1.0)
-                let scaleAirPressure = 1.0 / 100.0; 
+                let scaleAirPressure = 0.0002384185791; 
                 let hPaValue = tmp32 * scaleAirPressure;
 
                 return hPaValue;
