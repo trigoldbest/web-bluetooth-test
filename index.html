@@ -9,7 +9,7 @@
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-800">
 
-    <!-- 標題區 (設定為 Sticky 固定在上方，且不隨捲動消失) -->
+    <!-- 標題區 -->
     <div class="sticky top-0 z-50 bg-slate-50/95 backdrop-blur-sm pt-4 pb-3 border-b border-slate-200 mb-4 shadow-sm">
         <div class="max-w-2xl mx-auto px-4 text-center">
             <h1 class="text-3xl font-extrabold text-blue-700 mb-1 tracking-wider">智慧導引式肺適能儀</h1>
@@ -20,7 +20,7 @@
     <div class="max-w-2xl mx-auto px-4 pb-10">
         <div class="bg-white rounded-2xl shadow-xl p-8 border border-slate-100 mb-8">
             
-            <!-- 訓練處方設定區 (緊貼標題) -->
+            <!-- 訓練處方設定區 -->
             <div class="mb-6 bg-indigo-50 p-5 rounded-xl border border-indigo-100 shadow-inner">
                 <h3 class="text-sm font-bold text-indigo-800 mb-3 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -45,6 +45,20 @@
                 </button>
             </div>
 
+            <!-- Firebase 歷史紀錄區塊 -->
+            <div class="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                        歷史訓練紀錄 (雲端同步)
+                    </h3>
+                    <span id="syncStatus" class="text-xs text-slate-400">連線檢查中...</span>
+                </div>
+                <div id="historyList" class="max-h-32 overflow-y-auto space-y-2 text-sm font-mono">
+                    <p class="text-slate-400 text-xs italic">尚無訓練紀錄或正在載入中...</p>
+                </div>
+            </div>
+
             <!-- 壓力顯示與即時圖表區 -->
             <div class="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200 relative overflow-hidden">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-4 gap-4 relative z-10">
@@ -63,7 +77,6 @@
                     </div>
                 </div>
                 
-                <!-- 圖表容器，加入目標圖示 -->
                 <div class="w-full h-64 relative" id="chartContainer">
                     <canvas id="pressureChart"></canvas>
                     <div id="targetIcon" class="hidden absolute left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold border border-blue-300 shadow-md pointer-events-none transition-all duration-300 z-20 flex items-center gap-1">
@@ -96,14 +109,6 @@
                 </button>
             </div>
 
-            <!-- 接收資料顯示區 (縮小為一行) -->
-            <div class="mb-6">
-                <h3 class="text-xs font-medium text-slate-500 mb-2">接收到的資料 (最新一筆)</h3>
-                <div id="rxDataBox" class="bg-slate-100 rounded-lg p-3 flex items-center h-12 overflow-hidden font-mono text-sm border border-slate-200">
-                    <span class="text-slate-400">等待資料中...</span>
-                </div>
-            </div>
-
             <!-- 系統日誌 -->
             <div class="bg-slate-900 rounded-xl p-4">
                 <div class="flex justify-between items-center mb-2">
@@ -115,12 +120,13 @@
         </div>
     </div>
 
-    <script>
-        // 固定的 UUID 設定
-        const SERVICE_UUID = '0000ae30-0000-1000-8000-00805f9b34fb';
-        const WRITE_UUID = '0000ae01-0000-1000-8000-00805f9b34fb';
-        const NOTIFY_UUID = '0000ae02-0000-1000-8000-00805f9b34fb';
+    <!-- 將腳本改為 module 以支援 Firebase SDK 匯入 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // DOM 元素綁定
         const scanBtn = document.getElementById('scanBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
         const powerOffBtn = document.getElementById('powerOffBtn');
@@ -129,14 +135,122 @@
         const deviceNameEl = document.getElementById('deviceName');
         const deviceNameContainer = document.getElementById('deviceNameContainer');
         const logBox = document.getElementById('logBox');
-        const rxDataBox = document.getElementById('rxDataBox');
-        
-        // 圖表與氣壓顯示相關元素
         const pressureText = document.getElementById('pressureText');
         const timeRangeSelect = document.getElementById('timeRangeSelect');
         const targetIcon = document.getElementById('targetIcon');
+        const historyList = document.getElementById('historyList');
+        const syncStatus = document.getElementById('syncStatus');
 
-        // 語音合成引擎
+        // ==========================================
+        // Firebase 雲端資料庫初始化與串接
+        // ==========================================
+        const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let unsubscribeHistory = null;
+
+        try {
+            const firebaseConfig = JSON.parse(firebaseConfigStr);
+            if (Object.keys(firebaseConfig).length > 0) {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // 執行登入 (必須先登入才能讀寫資料)
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (err) {
+                        log('Firebase 驗證失敗: ' + err.message, 'error');
+                        syncStatus.textContent = '雲端驗證失敗';
+                    }
+                };
+                initAuth();
+
+                onAuthStateChanged(auth, (user) => {
+                    currentUser = user;
+                    if (user) {
+                        syncStatus.textContent = '已連線至雲端 (即時同步)';
+                        syncStatus.className = 'text-xs text-emerald-500 font-bold';
+                        loadTrainingHistory();
+                    }
+                });
+            } else {
+                syncStatus.textContent = '未啟用雲端功能 (Local)';
+            }
+        } catch (e) {
+            console.warn("Firebase 初始化失敗:", e);
+            syncStatus.textContent = '雲端載入錯誤';
+        }
+
+        function loadTrainingHistory() {
+            if (!currentUser || !db) return;
+            const recordsRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'training_records');
+            
+            // 即時監聽資料庫變化
+            unsubscribeHistory = onSnapshot(recordsRef, (snapshot) => {
+                const records = [];
+                snapshot.forEach(doc => {
+                    records.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // 依據時間降冪排序 (最新的在最上面)
+                records.sort((a, b) => b.timestamp - a.timestamp);
+                
+                if (records.length === 0) {
+                    historyList.innerHTML = '<p class="text-slate-400 text-xs italic">尚未有訓練紀錄，完成一次訓練後將顯示於此。</p>';
+                } else {
+                    historyList.innerHTML = records.map(record => {
+                        const date = new Date(record.timestamp).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        return `
+                            <div class="flex justify-between items-center bg-white p-2 rounded border border-slate-100 shadow-sm">
+                                <div>
+                                    <span class="text-xs text-slate-500">${date}</span>
+                                    <p class="text-sm text-slate-700 font-bold">完成 <span class="text-indigo-600">${record.completedCycles}</span> 次循環</p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-xs text-slate-400">目標: ${record.targetPressure} hPA</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }, (error) => {
+                console.error("載入紀錄錯誤:", error);
+                log('載入歷史紀錄失敗', 'error');
+            });
+        }
+
+        async function saveTrainingRecordToCloud(completedCycles, inhaleTime, exhaleTime, targetPressure) {
+            if (!currentUser || !db || completedCycles <= 0) return;
+            
+            try {
+                const recordsRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'training_records');
+                await addDoc(recordsRef, {
+                    timestamp: Date.now(),
+                    completedCycles: completedCycles,
+                    inhaleTime: inhaleTime,
+                    exhaleTime: exhaleTime,
+                    targetPressure: targetPressure
+                });
+                log(`已將本次訓練 (${completedCycles}次) 同步至雲端`, 'success');
+            } catch (err) {
+                log(`儲存雲端紀錄失敗: ${err.message}`, 'error');
+            }
+        }
+
+        // ==========================================
+        // 藍牙設備通訊與介面邏輯
+        // ==========================================
+        const SERVICE_UUID = '0000ae30-0000-1000-8000-00805f9b34fb';
+        const WRITE_UUID = '0000ae01-0000-1000-8000-00805f9b34fb';
+        const NOTIFY_UUID = '0000ae02-0000-1000-8000-00805f9b34fb';
         const synth = window.speechSynthesis;
 
         let bluetoothDevice = null;
@@ -145,63 +259,30 @@
         
         // 校正相關變數
         let isCalibrating = false;
-        let isReady = false; // 是否已完成5秒校正
+        let isReady = false; 
         let calibrationStartTime = 0;
         let calibrationValues = [];
         let basePressure = 0;
 
         // 訓練處方相關變數
         let isTraining = false;
-        let trainingPhase = 'IDLE'; // 'INHALE' or 'EXHALE'
+        let trainingPhase = 'IDLE'; 
         let hasReachedTarget = false;
         let targetLineValue = null;
         let trainingTimeout = null;
+        let currentTrainingCycles = 0; // 記錄本次訓練完成的循環數
 
-        // --- 初始化 Chart.js ---
         function initChart() {
             const ctx = document.getElementById('pressureChart').getContext('2d');
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     datasets: [
-                        {
-                            label: '氣壓',
-                            data: pressureDataPoints,
-                            borderColor: '#2563eb', // Tailwind blue-600
-                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            fill: true,
-                            tension: 0.1
-                        },
-                        {
-                            label: '目標線',
-                            data: [],
-                            borderColor: '#ef4444', // Tailwind red-500
-                            borderDash: [5, 5],
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            fill: false
-                        }
+                        { label: '氣壓', data: pressureDataPoints, borderColor: '#2563eb', backgroundColor: 'rgba(37, 99, 235, 0.1)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.1 },
+                        { label: '目標線', data: [], borderColor: '#ef4444', borderDash: [5, 5], borderWidth: 2, pointRadius: 0, fill: false }
                     ]
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: false, 
-                    plugins: {
-                        legend: { display: false } // 隱藏圖例說明
-                    },
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            display: false 
-                        },
-                        y: {
-                            // 讓圖表 Y 軸根據資料全自動縮放
-                        }
-                    }
-                }
+                options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } }, scales: { x: { type: 'linear', display: false }, y: {} } }
             });
         }
         initChart();
@@ -211,7 +292,6 @@
         scanBtn.addEventListener('click', async () => {
             try {
                 log(`正在請求裝置...`, 'info');
-                // 限定只能選擇名稱以 "SamwellAP" 開頭的裝置
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: 'SamwellAP' }],
                     optionalServices: [SERVICE_UUID] 
@@ -233,15 +313,12 @@
                 log('連線成功！', 'success');
                 updateUI(true, bluetoothDevice.name);
 
-                // --- 1. 啟動接收資料監聽 ---
                 await setupNotifications(server);
 
-                // --- 2. 連線後立即發送 10Hz 頻率設定指令 ---
                 const freqConfig = new Uint8Array([0x12, 0x05, 0xFF, 0x00, 0x04, 0x0A, 0x01, 0x03, 0x05, 0x12, 0x00]);
                 log('設定回傳頻率為 10Hz...', 'info');
                 await sendByteArray(server, freqConfig);
 
-                // --- 3. 設定連線 2 秒後自動傳送指令 0x29 ---
                 log('已排程：2 秒後傳送指令 0x29...', 'info');
                 setTimeout(async () => {
                     if (bluetoothDevice && bluetoothDevice.gatt.connected) {
@@ -268,13 +345,8 @@
             }
         }
 
-        // ==========================================
-        // 氣壓資料解析邏輯
-        // ==========================================
         function parsePressureData(dataView) {
-            if (dataView.byteLength < 7 || dataView.getUint8(0) !== 0x11) {
-                return null; 
-            }
+            if (dataView.byteLength < 7 || dataView.getUint8(0) !== 0x11) return null; 
 
             let ctl = (dataView.getUint8(2) << 8) | dataView.getUint8(1);
             let L = 7;
@@ -293,36 +365,19 @@
                 let b2 = dataView.getUint8(L + 2);
                 let tmp32 = (b2 << 16) | (b1 << 8) | b0;
                 
-                if ((tmp32 & 0x800000) !== 0) {
-                    tmp32 = tmp32 | 0xff000000;
-                }
-
-                // 依照使用者需求，指定倍率
-                let scaleAirPressure = 0.0002384185791; 
-                let hPaValue = tmp32 * scaleAirPressure;
-
-                return hPaValue;
+                if ((tmp32 & 0x800000) !== 0) tmp32 = tmp32 | 0xff000000;
+                return tmp32 * 0.0002384185791;
             }
             return null; 
         }
 
         function handleCharacteristicValueChanged(event) {
             const value = event.target.value; 
-            let hexString = '';
-            for (let i = 0; i < value.byteLength; i++) {
-                hexString += value.getUint8(i).toString(16).padStart(2, '0').toUpperCase() + ' ';
-            }
-            
-            // 顯示最新一筆資料
-            rxDataBox.innerHTML = `<div class="w-full truncate"><span class="text-xs text-slate-400">HEX:</span> <span class="tracking-widest text-blue-600 font-semibold ml-2">${hexString}</span></div>`;
-
-            // 取出氣壓並執行校正邏輯
             const rawPressure = parsePressureData(value);
             
             if (rawPressure !== null) {
                 const now = Date.now();
 
-                // 初始化 5 秒校正邏輯
                 if (!isCalibrating && !isReady) {
                     isCalibrating = true;
                     calibrationStartTime = now;
@@ -337,7 +392,6 @@
                     if (remaining > 0) {
                         pressureText.textContent = `初始化倒數: ${remaining}`;
                     } else {
-                        // 校正完成
                         let sum = calibrationValues.reduce((a, b) => a + b, 0);
                         basePressure = sum / calibrationValues.length;
                         isCalibrating = false;
@@ -346,26 +400,17 @@
                     }
                 } 
                 else if (isReady) {
-                    // 減去基準值之校正後壓力
                     let adjustedPressure = rawPressure - basePressure;
                     pressureText.textContent = `${adjustedPressure.toFixed(2)}`;
                     
-                    // =====================================
-                    // 檢查訓練目標
-                    // =====================================
                     if (isTraining && trainingPhase === 'INHALE' && !hasReachedTarget) {
-                        // 低氣壓目標，因此判斷是否小於等於目標值
                         if (adjustedPressure <= targetLineValue) {
                             hasReachedTarget = true;
                             speak("好棒棒");
                         }
                     }
 
-                    // =====================================
-                    // 繪圖區更新
-                    // =====================================
                     pressureDataPoints.push({ x: now, y: adjustedPressure });
-                    
                     const timeWindow = parseInt(timeRangeSelect.value) * 1000;
                     const cutoffTime = now - timeWindow;
                     
@@ -376,17 +421,10 @@
                     chartInstance.options.scales.x.min = cutoffTime;
                     chartInstance.options.scales.x.max = now;
 
-                    // 處理紅色的目標輔助線與定位點圖示
                     if (isTraining && targetLineValue !== null) {
-                        chartInstance.data.datasets[1].data = [
-                            { x: cutoffTime, y: targetLineValue },
-                            { x: now, y: targetLineValue }
-                        ];
-
-                        // 將 HTML 圖示定位到目標線高度
+                        chartInstance.data.datasets[1].data = [{ x: cutoffTime, y: targetLineValue }, { x: now, y: targetLineValue }];
                         if (trainingPhase === 'INHALE') {
                             const yPixel = chartInstance.scales.y.getPixelForValue(targetLineValue);
-                            // 確保取得有效的像素位置才顯示圖示
                             if (!isNaN(yPixel)) {
                                 targetIcon.style.top = `${yPixel}px`;
                                 targetIcon.classList.remove('hidden');
@@ -398,23 +436,17 @@
                         chartInstance.data.datasets[1].data = [];
                         targetIcon.classList.add('hidden');
                     }
-                    
                     chartInstance.update();
                 }
             }
         }
 
-        // ==========================================
-        // 語音與訓練導引邏輯
-        // ==========================================
         function speak(text) {
-            if (synth.speaking) {
-                synth.cancel(); // 若正在講話則打斷，保證語音即時性
-            }
+            if (synth.speaking) synth.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'zh-TW'; // 設定為中文
-            utterance.rate = 1.1;     // 語速
-            utterance.pitch = 1.2;    // 稍微提高音調偏向女聲
+            utterance.lang = 'zh-TW'; 
+            utterance.rate = 1.1;     
+            utterance.pitch = 1.2;    
             synth.speak(utterance);
         }
 
@@ -425,49 +457,41 @@
             const exhaleTimeMs = parseFloat(document.getElementById('exhaleTime').value) * 1000;
             targetLineValue = parseFloat(document.getElementById('targetPressure').value);
 
-            // --- 吸氣階段 ---
             trainingPhase = 'INHALE';
             hasReachedTarget = false;
             speak("吸氣");
             
-            // 等待吸氣時間 (拆分為前段與最後 0.5 秒)
             const firstWait = Math.max(0, inhaleTimeMs - 500);
             const secondWait = inhaleTimeMs - firstWait;
 
-            // 前段等待
             await new Promise(r => { trainingTimeout = setTimeout(r, firstWait); });
-            if (!isTraining) return; // 若中途按了停止則跳出
+            if (!isTraining) return; 
 
-            // 進入最後 0.5 秒前檢查是否達標，未達標則加油
-            if (!hasReachedTarget) {
-                speak("加油");
-            }
+            if (!hasReachedTarget) speak("加油");
 
-            // 後段等待 (最後的 0.5 秒)
             if (secondWait > 0) {
                 await new Promise(r => { trainingTimeout = setTimeout(r, secondWait); });
             }
             if (!isTraining) return;
 
-            // --- 呼氣階段 ---
             trainingPhase = 'EXHALE';
-            targetIcon.classList.add('hidden'); // 呼氣時隱藏圖示
+            targetIcon.classList.add('hidden'); 
             speak("吐氣");
 
-            // 等待呼氣秒數
             await new Promise(r => { trainingTimeout = setTimeout(r, exhaleTimeMs); });
-            if (!isTraining) return; // 若中途按了停止則跳出
+            if (!isTraining) return; 
 
-            // 無窮迴圈：自動進行下一次
+            // 完成一次完整的吸吐循環
+            currentTrainingCycles++;
+
             runTrainingCycle();
         }
 
-        // 停止訓練邏輯
         function stopTraining() {
             if (!isTraining) return;
             isTraining = false;
             clearTimeout(trainingTimeout);
-            synth.cancel(); // 停止講話
+            synth.cancel(); 
             
             trainingBtn.textContent = "開始導引訓練";
             trainingBtn.classList.replace('bg-rose-600', 'bg-indigo-600');
@@ -480,9 +504,16 @@
                 chartInstance.update();
             }
             log('已停止導引訓練', 'warning');
+
+            // 訓練結束時儲存紀錄到雲端
+            if (currentTrainingCycles > 0) {
+                const iTime = document.getElementById('inhaleTime').value;
+                const eTime = document.getElementById('exhaleTime').value;
+                const targetP = document.getElementById('targetPressure').value;
+                saveTrainingRecordToCloud(currentTrainingCycles, parseFloat(iTime), parseFloat(eTime), parseFloat(targetP));
+            }
         }
 
-        // 開始 / 停止訓練按鈕
         trainingBtn.addEventListener('click', () => {
             if (!isReady) {
                 alert("請先連線裝置，並等待 5 秒氣壓初始化完成後再開始訓練！");
@@ -492,14 +523,13 @@
             if (isTraining) {
                 stopTraining();
             } else {
-                // 啟動訓練
                 isTraining = true;
+                currentTrainingCycles = 0; // 重置循環計數
                 trainingBtn.textContent = "停止導引訓練";
                 trainingBtn.classList.replace('bg-indigo-600', 'bg-rose-600');
                 trainingBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-rose-700');
                 log('啟動導引訓練', 'success');
                 
-                // 初次點擊時觸發無聲語音，解鎖瀏覽器安全限制
                 const unlockAudio = new SpeechSynthesisUtterance('');
                 synth.speak(unlockAudio);
 
@@ -507,7 +537,6 @@
             }
         });
 
-        // 發送 Byte Array 指令的通用函式
         async function sendByteArray(server, uint8Array) {
             try {
                 const service = await server.getPrimaryService(SERVICE_UUID);
@@ -522,7 +551,6 @@
             }
         }
 
-        // --- 綁定關機按鈕 (0x43) ---
         powerOffBtn.addEventListener('click', async () => {
             if (bluetoothDevice && bluetoothDevice.gatt.connected) {
                 log('執行關機指令...', 'warning');
@@ -536,7 +564,7 @@
             log('裝置已中斷連線。', 'warning');
             isCalibrating = false;
             isReady = false;
-            stopTraining(); // 斷線時確保停止訓練與語音
+            stopTraining(); 
             updateUI(false);
         }
 
