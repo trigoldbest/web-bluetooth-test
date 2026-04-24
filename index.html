@@ -9,16 +9,18 @@
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-800">
 
-    <div class="max-w-2xl mx-auto pt-10 px-4">
-        <!-- 標題區 (依照需求更新) -->
-        <div class="text-center mb-8">
+    <!-- 標題區 (設定為 Sticky 固定在上方，且不隨捲動消失) -->
+    <div class="sticky top-0 z-50 bg-slate-50/95 backdrop-blur-sm pt-4 pb-3 border-b border-slate-200 mb-4 shadow-sm">
+        <div class="max-w-2xl mx-auto px-4 text-center">
             <h1 class="text-3xl font-extrabold text-blue-700 mb-1 tracking-wider">智慧導引式肺適能儀</h1>
             <p class="text-xs font-light text-blue-500 tracking-widest">Samwell Testing Inc.</p>
         </div>
+    </div>
 
+    <div class="max-w-2xl mx-auto px-4 pb-10">
         <div class="bg-white rounded-2xl shadow-xl p-8 border border-slate-100 mb-8">
             
-            <!-- 訓練處方設定區 -->
+            <!-- 訓練處方設定區 (緊貼標題) -->
             <div class="mb-6 bg-indigo-50 p-5 rounded-xl border border-indigo-100 shadow-inner">
                 <h3 class="text-sm font-bold text-indigo-800 mb-3 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -46,8 +48,8 @@
             <!-- 壓力顯示與即時圖表區 -->
             <div class="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200 relative overflow-hidden">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-4 gap-4 relative z-10">
-                    <div>
-                        <h3 class="text-sm font-bold text-slate-700 mb-1">吸氣強度 = BV.hPA</h3>
+                    <div class="flex items-baseline gap-2">
+                        <h3 class="text-xl font-bold text-slate-700">吸氣強度 =</h3>
                         <div class="text-4xl font-extrabold text-blue-600 tracking-tight transition-all" id="pressureText">--</div>
                     </div>
                     <div>
@@ -196,7 +198,7 @@
                             display: false 
                         },
                         y: {
-                            // 移除 suggestedMin / suggestedMax，讓圖表 Y 軸根據資料全自動縮放
+                            // 讓圖表 Y 軸根據資料全自動縮放
                         }
                     }
                 }
@@ -209,8 +211,9 @@
         scanBtn.addEventListener('click', async () => {
             try {
                 log(`正在請求裝置...`, 'info');
+                // 限定只能選擇名稱以 "SamwellAP" 開頭的裝置
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
+                    filters: [{ namePrefix: 'SamwellAP' }],
                     optionalServices: [SERVICE_UUID] 
                 });
 
@@ -427,14 +430,24 @@
             hasReachedTarget = false;
             speak("吸氣");
             
-            // 等待吸氣秒數
-            await new Promise(r => { trainingTimeout = setTimeout(r, inhaleTimeMs); });
+            // 等待吸氣時間 (拆分為前段與最後 0.5 秒)
+            const firstWait = Math.max(0, inhaleTimeMs - 500);
+            const secondWait = inhaleTimeMs - firstWait;
+
+            // 前段等待
+            await new Promise(r => { trainingTimeout = setTimeout(r, firstWait); });
             if (!isTraining) return; // 若中途按了停止則跳出
 
-            // 若吸氣時間結束仍未達標
+            // 進入最後 0.5 秒前檢查是否達標，未達標則加油
             if (!hasReachedTarget) {
                 speak("加油");
             }
+
+            // 後段等待 (最後的 0.5 秒)
+            if (secondWait > 0) {
+                await new Promise(r => { trainingTimeout = setTimeout(r, secondWait); });
+            }
+            if (!isTraining) return;
 
             // --- 呼氣階段 ---
             trainingPhase = 'EXHALE';
@@ -449,6 +462,26 @@
             runTrainingCycle();
         }
 
+        // 停止訓練邏輯
+        function stopTraining() {
+            if (!isTraining) return;
+            isTraining = false;
+            clearTimeout(trainingTimeout);
+            synth.cancel(); // 停止講話
+            
+            trainingBtn.textContent = "開始導引訓練";
+            trainingBtn.classList.replace('bg-rose-600', 'bg-indigo-600');
+            trainingBtn.classList.replace('hover:bg-rose-700', 'hover:bg-indigo-700');
+            
+            targetLineValue = null;
+            targetIcon.classList.add('hidden');
+            if (chartInstance) {
+                chartInstance.data.datasets[1].data = [];
+                chartInstance.update();
+            }
+            log('已停止導引訓練', 'warning');
+        }
+
         // 開始 / 停止訓練按鈕
         trainingBtn.addEventListener('click', () => {
             if (!isReady) {
@@ -457,20 +490,7 @@
             }
 
             if (isTraining) {
-                // 停止訓練
-                isTraining = false;
-                clearTimeout(trainingTimeout);
-                synth.cancel(); // 停止講話
-                
-                trainingBtn.textContent = "開始導引訓練";
-                trainingBtn.classList.replace('bg-rose-600', 'bg-indigo-600');
-                trainingBtn.classList.replace('hover:bg-rose-700', 'hover:bg-indigo-700');
-                
-                targetLineValue = null;
-                targetIcon.classList.add('hidden');
-                chartInstance.data.datasets[1].data = [];
-                chartInstance.update();
-                log('已停止導引訓練', 'warning');
+                stopTraining();
             } else {
                 // 啟動訓練
                 isTraining = true;
@@ -516,7 +536,7 @@
             log('裝置已中斷連線。', 'warning');
             isCalibrating = false;
             isReady = false;
-            if (isTraining) trainingBtn.click(); // 若斷線時正在訓練則自動停止
+            stopTraining(); // 斷線時確保停止訓練與語音
             updateUI(false);
         }
 
