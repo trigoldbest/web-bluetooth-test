@@ -5,16 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web 藍牙指令測試器</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-800">
 
     <div class="max-w-2xl mx-auto pt-12 px-4">
         <div class="text-center mb-10">
             <h1 class="text-3xl font-extrabold text-slate-900 mb-2">Web 藍牙連線 & 自動指令</h1>
-            <p class="text-slate-600">連線後 5 秒內將自動發送 0x29 指令</p>
+            <p class="text-slate-600">連線後將自動設定 10Hz 並開始繪製即時氣壓圖表</p>
         </div>
 
         <div class="bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
+            <!-- 壓力顯示與即時圖表區 -->
+            <div class="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-4 gap-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-700 mb-1">即時氣壓 (BV.hPA)</h3>
+                        <div class="text-3xl font-extrabold text-blue-600" id="pressureText">壓力 = -- hPA</div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-slate-500 mr-2">圖表顯示範圍:</label>
+                        <select id="timeRangeSelect" class="text-sm p-1 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="10">10 秒</option>
+                            <option value="20">20 秒</option>
+                            <option value="30">30 秒</option>
+                            <option value="60">60 秒</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="w-full h-64">
+                    <canvas id="pressureChart"></canvas>
+                </div>
+            </div>
+
             <div class="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
                 <div>
                     <p class="text-sm font-medium text-slate-500 mb-1">目前狀態</p>
@@ -32,6 +55,9 @@
                 </button>
                 <button id="disconnectBtn" class="hidden flex-1 bg-rose-50 text-rose-600 border border-rose-200 font-semibold py-3 px-6 rounded-xl transition">
                     中斷連線
+                </button>
+                <button id="powerOffBtn" class="hidden flex-1 bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-6 rounded-xl transition shadow-sm">
+                    關機 (0x43)
                 </button>
             </div>
 
@@ -53,32 +79,74 @@
     </div>
 
     <script>
-        // --- 請根據您的藍牙裝置修改以下 UUID ---
-        const TARGET_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; // 例如：常見的序列埠服務
-        const TARGET_CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'; // 例如：寫入特徵
-        const TARGET_NOTIFY_CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'; // 例如：接收特徵 (很多模組收發是同一個 UUID)
-        // ------------------------------------
+        // 固定的 UUID 設定
+        const SERVICE_UUID = '0000ae30-0000-1000-8000-00805f9b34fb';
+        const WRITE_UUID = '0000ae01-0000-1000-8000-00805f9b34fb';
+        const NOTIFY_UUID = '0000ae02-0000-1000-8000-00805f9b34fb';
 
         const scanBtn = document.getElementById('scanBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
+        const powerOffBtn = document.getElementById('powerOffBtn');
         const statusText = document.getElementById('statusText');
         const deviceNameEl = document.getElementById('deviceName');
         const deviceNameContainer = document.getElementById('deviceNameContainer');
         const logBox = document.getElementById('logBox');
         const rxDataBox = document.getElementById('rxDataBox');
         const clearDataBtn = document.getElementById('clearDataBtn');
+        
+        // 圖表與氣壓顯示相關元素
+        const pressureText = document.getElementById('pressureText');
+        const timeRangeSelect = document.getElementById('timeRangeSelect');
 
         let bluetoothDevice = null;
+        let chartInstance = null;
+        let pressureDataPoints = []; // 存放 {x: timestamp, y: value} 供圖表使用
+
+        // --- 初始化 Chart.js ---
+        function initChart() {
+            const ctx = document.getElementById('pressureChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: '氣壓 (hPA)',
+                        data: pressureDataPoints,
+                        borderColor: '#2563eb', // Tailwind blue-600
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // 關閉動畫以應付 10Hz 高頻率更新，提升效能
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            display: false // 隱藏 X 軸數值，以相對時間滾動顯示
+                        },
+                        y: {
+                            // 預設縮放範圍，會根據數據自動調整
+                            suggestedMin: 1000,
+                            suggestedMax: 1020
+                        }
+                    }
+                }
+            });
+        }
+        initChart();
 
         clearDataBtn.addEventListener('click', () => { rxDataBox.innerHTML = ''; });
 
         scanBtn.addEventListener('click', async () => {
             try {
-                log('正在請求裝置...', 'info');
+                log(`正在請求裝置...`, 'info');
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
-                    // 重要：必須在 optionalServices 放入你要用的 Service UUID，否則無法存取
                     acceptAllDevices: true,
-                    optionalServices: [TARGET_SERVICE_UUID] 
+                    optionalServices: [SERVICE_UUID] 
                 });
 
                 bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
@@ -100,11 +168,16 @@
                 // --- 1. 啟動接收資料監聽 ---
                 await setupNotifications(server);
 
-                // --- 2. 設定 5 秒後自動傳送指令 ---
+                // --- 2. 連線後立即發送 10Hz 頻率設定指令 ---
+                const freqConfig = new Uint8Array([0x12, 0x05, 0xFF, 0x00, 0x04, 0x0A, 0x01, 0x03, 0x05, 0x12, 0x00]);
+                log('正在設定裝置回傳頻率為 10Hz...', 'info');
+                await sendByteArray(server, freqConfig);
+
+                // --- 3. 設定 5 秒後自動傳送指令 0x29 ---
                 log('已排程：5 秒後傳送指令 0x29...', 'info');
                 setTimeout(async () => {
                     if (bluetoothDevice && bluetoothDevice.gatt.connected) {
-                        await sendCommand(server, 0x29);
+                        await sendByteArray(server, new Uint8Array([0x29]));
                     }
                 }, 5000);
 
@@ -116,9 +189,8 @@
 
         async function setupNotifications(server) {
             try {
-                log(`正在設定接收通知: ${TARGET_NOTIFY_CHARACTERISTIC_UUID}`, 'info');
-                const service = await server.getPrimaryService(TARGET_SERVICE_UUID);
-                const characteristic = await service.getCharacteristic(TARGET_NOTIFY_CHARACTERISTIC_UUID);
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                const characteristic = await service.getCharacteristic(NOTIFY_UUID);
                 
                 await characteristic.startNotifications();
                 characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
@@ -128,52 +200,86 @@
             }
         }
 
+        // ==========================================
+        // 🚨 氣壓資料解析邏輯 (請依據您的 txt 替換) 🚨
+        // ==========================================
+        function parsePressureData(valueView) {
+            // [重要] 我無法讀取您的 BLE解析.txt，因此這裡放入隨機模擬資料確保圖表能運作。
+            // 請根據 txt 的內容，替換此處邏輯。
+            // 例如，若氣壓 Float 存在第 4 byte： return valueView.getFloat32(4, true); 
+            
+            let simulatedVariation = (Math.random() * 0.5 - 0.25);
+            return 1013.25 + simulatedVariation; 
+        }
+
         function handleCharacteristicValueChanged(event) {
             const value = event.target.value; // DataView 物件
             let hexString = '';
-            let textString = '';
             
-            // 解析每個 Byte
+            // 解析 Hex 字串
             for (let i = 0; i < value.byteLength; i++) {
                 const byte = value.getUint8(i);
-                // 轉換為十六進制字串 (例如: 0A, FF)
                 hexString += byte.toString(16).padStart(2, '0').toUpperCase() + ' ';
-                // 嘗試轉換為可見的 ASCII 字元，否則顯示小數點 '.'
-                textString += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.';
             }
             
-            // 顯示在接收資料區塊
-            const dataRow = document.createElement('div');
-            dataRow.className = 'border-b border-slate-200 pb-2 last:border-0';
-            dataRow.innerHTML = `
-                <div class="text-xs text-slate-400 mb-0.5">收到資料：</div>
-                <div><span class="text-blue-600 font-bold ml-1">Hex:</span> <span class="tracking-widest">${hexString}</span></div>
-                <div><span class="text-emerald-600 font-bold ml-1">Txt:</span> <span class="bg-slate-200 px-1 rounded">${textString}</span></div>
-            `;
-            rxDataBox.appendChild(dataRow);
-            rxDataBox.scrollTop = rxDataBox.scrollHeight; // 自動捲動到底部
+            // --- 1. 取出氣壓並更新文字 ---
+            const pressureValue = parsePressureData(value);
+            pressureText.textContent = `壓力 = ${pressureValue.toFixed(2)} hPA`;
+            
+            // --- 2. 更新即時圖表 ---
+            const now = Date.now();
+            pressureDataPoints.push({ x: now, y: pressureValue });
+            
+            // 依據下拉選單過濾過舊的資料 (10s, 20s, 30s, 60s)
+            const timeWindow = parseInt(timeRangeSelect.value) * 1000;
+            const cutoffTime = now - timeWindow;
+            
+            while(pressureDataPoints.length > 0 && pressureDataPoints[0].x < cutoffTime) {
+                pressureDataPoints.shift();
+            }
+            
+            // 維持圖表 X 軸為最近的秒數，形成滾動效果
+            chartInstance.options.scales.x.min = cutoffTime;
+            chartInstance.options.scales.x.max = now;
+            chartInstance.update();
 
-            log(`收到資料 [Hex]: ${hexString.trim()}`, 'success');
+            // --- 3. 更新接收 Log 區塊 ---
+            // 為了避免 10Hz 導致網頁 DOM 卡頓，簡化這裡的輸出並且只保留 20 行
+            const dataRow = document.createElement('div');
+            dataRow.className = 'border-b border-slate-200 pb-1 last:border-0';
+            dataRow.innerHTML = `<span class="text-xs text-slate-400">Hex:</span> <span class="tracking-wider text-blue-600">${hexString}</span>`;
+            rxDataBox.appendChild(dataRow);
+            
+            while (rxDataBox.children.length > 20) {
+                rxDataBox.removeChild(rxDataBox.firstChild);
+            }
+            rxDataBox.scrollTop = rxDataBox.scrollHeight;
         }
 
-        async function sendCommand(server, hexValue) {
+        // 發送 Byte Array 指令的通用函式
+        async function sendByteArray(server, uint8Array) {
             try {
-                log(`正在尋找服務: ${TARGET_SERVICE_UUID}`, 'info');
-                const service = await server.getPrimaryService(TARGET_SERVICE_UUID);
-                
-                log(`正在尋找特徵: ${TARGET_CHARACTERISTIC_UUID}`, 'info');
-                const characteristic = await service.getCharacteristic(TARGET_CHARACTERISTIC_UUID);
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                const characteristic = await service.getCharacteristic(WRITE_UUID);
 
-                // 準備資料：0x29 必須放入 Uint8Array 傳送
-                const data = new Uint8Array([hexValue]);
-                log(`正在寫入指令: 0x${hexValue.toString(16)}...`, 'info');
+                let hexStr = Array.from(uint8Array).map(b => '0x' + b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+                log(`寫入指令: ${hexStr}`, 'info');
                 
-                await characteristic.writeValue(data);
-                log(`指令 0x${hexValue.toString(16)} 發送成功！`, 'success');
+                await characteristic.writeValue(uint8Array);
             } catch (error) {
                 log(`發送指令失敗: ${error.message}`, 'error');
             }
         }
+
+        // --- 綁定關機按鈕 (0x43) ---
+        powerOffBtn.addEventListener('click', async () => {
+            if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                log('執行關機指令...', 'warning');
+                await sendByteArray(bluetoothDevice.gatt, new Uint8Array([0x43]));
+            } else {
+                log('請先連線裝置！', 'error');
+            }
+        });
 
         function onDisconnected() {
             log('裝置已中斷連線。', 'warning');
@@ -192,18 +298,20 @@
                 deviceNameEl.textContent = name;
                 scanBtn.classList.add('hidden');
                 disconnectBtn.classList.remove('hidden');
+                powerOffBtn.classList.remove('hidden');
             } else {
                 statusText.textContent = '尚未連線';
                 statusText.className = 'text-xl font-bold text-slate-700';
                 deviceNameContainer.classList.add('hidden');
                 scanBtn.classList.remove('hidden');
                 disconnectBtn.classList.add('hidden');
+                powerOffBtn.classList.add('hidden');
             }
         }
 
         function log(message, type = 'normal') {
             const p = document.createElement('p');
-            p.className = type === 'error' ? 'text-rose-400' : type === 'success' ? 'text-emerald-400' : 'text-green-400';
+            p.className = type === 'error' ? 'text-rose-400' : type === 'success' ? 'text-emerald-400' : type === 'warning' ? 'text-yellow-400' : 'text-green-400';
             p.innerHTML = `> ${message}`;
             logBox.appendChild(p);
             logBox.scrollTop = logBox.scrollHeight;
@@ -211,24 +319,3 @@
     </script>
 </body>
 </html>
-```
-
-### 重點修改說明：
-
-1.  **`optionalServices` 的宣告**：在 `requestDevice` 時，必須將您要互動的 `TARGET_SERVICE_UUID` 寫入 `optionalServices` 陣列中。如果沒寫，瀏覽器會因為安全原因禁止網頁存取該服務。
-2.  **`Uint8Array` 封裝**：藍牙傳輸不是傳送字串或純數字，必須封裝成 `Uint8Array` 格式。`new Uint8Array([0x29])` 會建立一個包含單一字節（值為 41）的緩衝區。
-3.  **`setTimeout` 延遲發送**：在 `connectToGattServer` 成功後觸發計時器，並在 5000 毫秒（5 秒）後執行 `sendCommand`。
-4.  **異步操作 (Async/Await)**：獲取服務、特徵以及寫入資料都是非同步過程，必須使用 `await` 確保前一個動作完成後再執行下一個動作。
-
----
-
-為了幫助您理解這背後的邏輯流程，您可以參考下方的藍牙指令執行序列視覺化工具：
-
-```json?chameleon
-{
-  "component": "LlmGeneratedComponent",
-  "props": {
-    "height": "600px",
-    "prompt": "建立一個「Web Bluetooth 指令發送時序視覺化」小工具。中文字介面。 \n\n1. 目標：讓使用者理解從連線到發送指令 0x29 的邏輯流程與時間軸。\n2. 初始值：\n   - 指令：0x29\n   - 延遲時間：5 秒\n   - 狀態：初始狀態\n3. 互動與配置：\n   - 提供一個「開始模擬」按鈕。\n   - 點擊按鈕後，模擬 5 秒的倒數計時。\n   - 在時間軸上標示出三個主要階段：[連線成功] -> [等待 5 秒] -> [發送 0x29]。\n   - 流程說明區：動態顯示目前正在執行的 JavaScript 代碼塊（例如正在執行 gatt.connect()、setTimeout、writeValue 等）。\n4. 行為細節：\n   - 使用進度條顯示 5 秒的倒數。\n   - 當進度條滿時，觸發「發送成功」的視覺特效。\n   - 允許使用者調整「延遲秒數」參數，並即時反應在模擬中。"
-  }
-}
