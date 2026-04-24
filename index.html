@@ -35,6 +35,17 @@
                 </button>
             </div>
 
+            <!-- 接收資料顯示區 -->
+            <div class="mb-8">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-medium text-slate-500">接收到的資料 (Hex / Text)</h3>
+                    <button id="clearDataBtn" class="text-xs text-slate-400 hover:text-slate-600 transition">清除資料</button>
+                </div>
+                <div id="rxDataBox" class="bg-slate-50 rounded-xl p-4 h-32 overflow-y-auto font-mono text-sm text-slate-700 border border-slate-200 space-y-2">
+                    <!-- 接收到的資料會顯示在這裡 -->
+                </div>
+            </div>
+
             <div class="bg-slate-900 rounded-xl p-4">
                 <div id="logBox" class="h-48 overflow-y-auto font-mono text-sm text-green-400 space-y-1"></div>
             </div>
@@ -45,6 +56,7 @@
         // --- 請根據您的藍牙裝置修改以下 UUID ---
         const TARGET_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; // 例如：常見的序列埠服務
         const TARGET_CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'; // 例如：寫入特徵
+        const TARGET_NOTIFY_CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'; // 例如：接收特徵 (很多模組收發是同一個 UUID)
         // ------------------------------------
 
         const scanBtn = document.getElementById('scanBtn');
@@ -53,8 +65,12 @@
         const deviceNameEl = document.getElementById('deviceName');
         const deviceNameContainer = document.getElementById('deviceNameContainer');
         const logBox = document.getElementById('logBox');
+        const rxDataBox = document.getElementById('rxDataBox');
+        const clearDataBtn = document.getElementById('clearDataBtn');
 
         let bluetoothDevice = null;
+
+        clearDataBtn.addEventListener('click', () => { rxDataBox.innerHTML = ''; });
 
         scanBtn.addEventListener('click', async () => {
             try {
@@ -81,7 +97,10 @@
                 log('連線成功！', 'success');
                 updateUI(true, bluetoothDevice.name);
 
-                // --- 設定 5 秒後自動傳送指令 ---
+                // --- 1. 啟動接收資料監聽 ---
+                await setupNotifications(server);
+
+                // --- 2. 設定 5 秒後自動傳送指令 ---
                 log('已排程：5 秒後傳送指令 0x29...', 'info');
                 setTimeout(async () => {
                     if (bluetoothDevice && bluetoothDevice.gatt.connected) {
@@ -93,6 +112,48 @@
                 log(`連線失敗: ${error.message}`, 'error');
                 updateUI(false);
             }
+        }
+
+        async function setupNotifications(server) {
+            try {
+                log(`正在設定接收通知: ${TARGET_NOTIFY_CHARACTERISTIC_UUID}`, 'info');
+                const service = await server.getPrimaryService(TARGET_SERVICE_UUID);
+                const characteristic = await service.getCharacteristic(TARGET_NOTIFY_CHARACTERISTIC_UUID);
+                
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
+                log('已成功開啟資料接收監聽！', 'success');
+            } catch (error) {
+                log(`開啟接收通知失敗: ${error.message}`, 'error');
+            }
+        }
+
+        function handleCharacteristicValueChanged(event) {
+            const value = event.target.value; // DataView 物件
+            let hexString = '';
+            let textString = '';
+            
+            // 解析每個 Byte
+            for (let i = 0; i < value.byteLength; i++) {
+                const byte = value.getUint8(i);
+                // 轉換為十六進制字串 (例如: 0A, FF)
+                hexString += byte.toString(16).padStart(2, '0').toUpperCase() + ' ';
+                // 嘗試轉換為可見的 ASCII 字元，否則顯示小數點 '.'
+                textString += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.';
+            }
+            
+            // 顯示在接收資料區塊
+            const dataRow = document.createElement('div');
+            dataRow.className = 'border-b border-slate-200 pb-2 last:border-0';
+            dataRow.innerHTML = `
+                <div class="text-xs text-slate-400 mb-0.5">收到資料：</div>
+                <div><span class="text-blue-600 font-bold ml-1">Hex:</span> <span class="tracking-widest">${hexString}</span></div>
+                <div><span class="text-emerald-600 font-bold ml-1">Txt:</span> <span class="bg-slate-200 px-1 rounded">${textString}</span></div>
+            `;
+            rxDataBox.appendChild(dataRow);
+            rxDataBox.scrollTop = rxDataBox.scrollHeight; // 自動捲動到底部
+
+            log(`收到資料 [Hex]: ${hexString.trim()}`, 'success');
         }
 
         async function sendCommand(server, hexValue) {
