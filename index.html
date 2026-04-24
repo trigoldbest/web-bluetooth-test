@@ -201,15 +201,51 @@
         }
 
         // ==========================================
-        // 🚨 氣壓資料解析邏輯 (請依據您的 txt 替換) 🚨
+        // 🚨 氣壓資料解析邏輯 (已依據 BLE解析.txt 實作) 🚨
         // ==========================================
-        function parsePressureData(valueView) {
-            // [重要] 我無法讀取您的 BLE解析.txt，因此這裡放入隨機模擬資料確保圖表能運作。
-            // 請根據 txt 的內容，替換此處邏輯。
-            // 例如，若氣壓 Float 存在第 4 byte： return valueView.getFloat32(4, true); 
-            
-            let simulatedVariation = (Math.random() * 0.5 - 0.25);
-            return 1013.25 + simulatedVariation; 
+        function parsePressureData(dataView) {
+            // 檢查封包長度並確認開頭是否為 0x11
+            if (dataView.byteLength < 7 || dataView.getUint8(0) !== 0x11) {
+                return null; 
+            }
+
+            // 取出 ctl (数据订阅标识)
+            let ctl = (dataView.getUint8(2) << 8) | dataView.getUint8(1);
+            let L = 7;
+
+            // 依據 ctl 判斷前面有哪些資料，並向後推移指標 L
+            if ((ctl & 0x0001) !== 0) L += 6; // 加速度 (無重力)
+            if ((ctl & 0x0002) !== 0) L += 6; // 加速度 (含重力)
+            if ((ctl & 0x0004) !== 0) L += 6; // 角速度
+            if ((ctl & 0x0008) !== 0) L += 6; // 磁場
+
+            // 判斷是否包含 溫度、氣壓、高度 (0x0010)
+            if ((ctl & 0x0010) !== 0) {
+                // 確保封包長度足夠讀取 (Temp: 2 bytes, Pressure: 3 bytes)
+                if (L + 5 > dataView.byteLength) return null;
+
+                L += 2; // 跳過溫度資料
+
+                // 讀取氣壓 (由3個 Byte 組成)
+                let b0 = dataView.getUint8(L);
+                let b1 = dataView.getUint8(L + 1);
+                let b2 = dataView.getUint8(L + 2);
+                let tmp32 = (b2 << 16) | (b1 << 8) | b0;
+                
+                // 若最高位(第24位)為1，代表負數，進行符號擴展補上 FF
+                if ((tmp32 & 0x800000) !== 0) {
+                    tmp32 = tmp32 | 0xff000000;
+                }
+
+                // 大多數這類感測器直接輸出的氣壓單位為 Pa，因此除以 100 轉換為 hPa (百帕)
+                // (如果顯示的數值異常，例如小了 100 倍，請將此處改為 1.0)
+                let scaleAirPressure = 1.0 / 100.0; 
+                let hPaValue = tmp32 * scaleAirPressure;
+
+                return hPaValue;
+            }
+
+            return null; // 若此封包不含氣壓資料
         }
 
         function handleCharacteristicValueChanged(event) {
@@ -224,24 +260,28 @@
             
             // --- 1. 取出氣壓並更新文字 ---
             const pressureValue = parsePressureData(value);
-            pressureText.textContent = `壓力 = ${pressureValue.toFixed(2)} hPA`;
             
-            // --- 2. 更新即時圖表 ---
-            const now = Date.now();
-            pressureDataPoints.push({ x: now, y: pressureValue });
-            
-            // 依據下拉選單過濾過舊的資料 (10s, 20s, 30s, 60s)
-            const timeWindow = parseInt(timeRangeSelect.value) * 1000;
-            const cutoffTime = now - timeWindow;
-            
-            while(pressureDataPoints.length > 0 && pressureDataPoints[0].x < cutoffTime) {
-                pressureDataPoints.shift();
+            // 只有當該封包確實解析出氣壓時，才更新文字和圖表
+            if (pressureValue !== null) {
+                pressureText.textContent = `壓力 = ${pressureValue.toFixed(2)} hPA`;
+                
+                // --- 2. 更新即時圖表 ---
+                const now = Date.now();
+                pressureDataPoints.push({ x: now, y: pressureValue });
+                
+                // 依據下拉選單過濾過舊的資料 (10s, 20s, 30s, 60s)
+                const timeWindow = parseInt(timeRangeSelect.value) * 1000;
+                const cutoffTime = now - timeWindow;
+                
+                while(pressureDataPoints.length > 0 && pressureDataPoints[0].x < cutoffTime) {
+                    pressureDataPoints.shift();
+                }
+                
+                // 維持圖表 X 軸為最近的秒數，形成滾動效果
+                chartInstance.options.scales.x.min = cutoffTime;
+                chartInstance.options.scales.x.max = now;
+                chartInstance.update();
             }
-            
-            // 維持圖表 X 軸為最近的秒數，形成滾動效果
-            chartInstance.options.scales.x.min = cutoffTime;
-            chartInstance.options.scales.x.max = now;
-            chartInstance.update();
 
             // --- 3. 更新接收 Log 區塊 ---
             // 為了避免 10Hz 導致網頁 DOM 卡頓，簡化這裡的輸出並且只保留 20 行
