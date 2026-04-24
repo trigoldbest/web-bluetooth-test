@@ -3,29 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web 藍牙指令測試器</title>
+    <title>智慧導引式肺適能儀</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-800">
 
-    <div class="max-w-2xl mx-auto pt-12 px-4">
-        <div class="text-center mb-10">
-            <h1 class="text-3xl font-extrabold text-slate-900 mb-2">Web 藍牙連線 & 自動指令</h1>
-            <p class="text-slate-600">連線後將自動設定 10Hz 並開始繪製即時氣壓圖表</p>
+    <div class="max-w-2xl mx-auto pt-10 px-4">
+        <!-- 標題區 (依照需求更新) -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-extrabold text-blue-700 mb-1 tracking-wider">智慧導引式肺適能儀</h1>
+            <p class="text-xs font-light text-blue-500 tracking-widest">Samwell Testing Inc.</p>
         </div>
 
-        <div class="bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
-            <!-- 壓力顯示與即時圖表區 -->
-            <div class="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-4 gap-4">
+        <div class="bg-white rounded-2xl shadow-xl p-8 border border-slate-100 mb-8">
+            
+            <!-- 訓練處方設定區 -->
+            <div class="mb-6 bg-indigo-50 p-5 rounded-xl border border-indigo-100 shadow-inner">
+                <h3 class="text-sm font-bold text-indigo-800 mb-3 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    訓練處方設定
+                </h3>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
                     <div>
-                        <h3 class="text-sm font-bold text-slate-700 mb-1">即時氣壓 (BV.hPA)</h3>
-                        <div class="text-3xl font-extrabold text-blue-600" id="pressureText">壓力 = -- hPA</div>
+                        <label class="block text-xs font-semibold text-indigo-600 mb-1">吸氣秒數 (秒)</label>
+                        <input type="number" id="inhaleTime" value="3" class="w-full text-sm p-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500 mr-2">圖表顯示範圍:</label>
-                        <select id="timeRangeSelect" class="text-sm p-1 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                        <label class="block text-xs font-semibold text-indigo-600 mb-1">低氣壓目標 (hPA)</label>
+                        <input type="number" id="targetPressure" value="-10" class="w-full text-sm p-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-indigo-600 mb-1">呼氣秒數 (秒)</label>
+                        <input type="number" id="exhaleTime" value="3" class="w-full text-sm p-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                </div>
+                <button id="trainingBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition duration-200 shadow-md">
+                    開始導引訓練
+                </button>
+            </div>
+
+            <!-- 壓力顯示與即時圖表區 -->
+            <div class="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200 relative overflow-hidden">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-4 gap-4 relative z-10">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-700 mb-1">吸氣強度 = BV.hPA</h3>
+                        <div class="text-4xl font-extrabold text-blue-600 tracking-tight transition-all" id="pressureText">--</div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-slate-500 mr-2">顯示範圍:</label>
+                        <select id="timeRangeSelect" class="text-sm p-1 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                             <option value="10">10 秒</option>
                             <option value="20">20 秒</option>
                             <option value="30">30 秒</option>
@@ -33,23 +60,29 @@
                         </select>
                     </div>
                 </div>
-                <div class="w-full h-64">
+                
+                <!-- 圖表容器，加入目標圖示 -->
+                <div class="w-full h-64 relative" id="chartContainer">
                     <canvas id="pressureChart"></canvas>
+                    <div id="targetIcon" class="hidden absolute left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold border border-blue-300 shadow-md pointer-events-none transition-all duration-300 z-20 flex items-center gap-1">
+                        <span class="animate-pulse">🎯</span> 目標
+                    </div>
                 </div>
             </div>
 
-            <div class="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+            <!-- 狀態與連線控制區 -->
+            <div class="flex items-center justify-between mb-6 pb-6 border-b border-slate-100">
                 <div>
-                    <p class="text-sm font-medium text-slate-500 mb-1">目前狀態</p>
-                    <span id="statusText" class="text-xl font-bold text-slate-700">尚未連線</span>
+                    <p class="text-sm font-medium text-slate-500 mb-1">連線狀態</p>
+                    <span id="statusText" class="text-lg font-bold text-slate-700">尚未連線</span>
                 </div>
                 <div id="deviceNameContainer" class="hidden text-right">
-                    <p class="text-sm font-medium text-slate-500 mb-1">已連接裝置</p>
-                    <p id="deviceName" class="text-lg font-semibold text-blue-600">--</p>
+                    <p class="text-sm font-medium text-slate-500 mb-1">裝置名稱</p>
+                    <p id="deviceName" class="text-md font-semibold text-blue-600">--</p>
                 </div>
             </div>
 
-            <div class="flex gap-4 mb-8">
+            <div class="flex gap-4 mb-6">
                 <button id="scanBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition">
                     搜尋並連線
                 </button>
@@ -61,19 +94,21 @@
                 </button>
             </div>
 
-            <!-- 接收資料顯示區 -->
-            <div class="mb-8">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-sm font-medium text-slate-500">接收到的資料 (Hex / Text)</h3>
-                    <button id="clearDataBtn" class="text-xs text-slate-400 hover:text-slate-600 transition">清除資料</button>
-                </div>
-                <div id="rxDataBox" class="bg-slate-50 rounded-xl p-4 h-32 overflow-y-auto font-mono text-sm text-slate-700 border border-slate-200 space-y-2">
-                    <!-- 接收到的資料會顯示在這裡 -->
+            <!-- 接收資料顯示區 (縮小為一行) -->
+            <div class="mb-6">
+                <h3 class="text-xs font-medium text-slate-500 mb-2">接收到的資料 (最新一筆)</h3>
+                <div id="rxDataBox" class="bg-slate-100 rounded-lg p-3 flex items-center h-12 overflow-hidden font-mono text-sm border border-slate-200">
+                    <span class="text-slate-400">等待資料中...</span>
                 </div>
             </div>
 
+            <!-- 系統日誌 -->
             <div class="bg-slate-900 rounded-xl p-4">
-                <div id="logBox" class="h-48 overflow-y-auto font-mono text-sm text-green-400 space-y-1"></div>
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-mono text-slate-400">系統日誌</span>
+                    <button id="clearLogBtn" class="text-xs text-slate-500 hover:text-white transition">清除</button>
+                </div>
+                <div id="logBox" class="h-32 overflow-y-auto font-mono text-xs text-green-400 space-y-1"></div>
             </div>
         </div>
     </div>
@@ -87,20 +122,38 @@
         const scanBtn = document.getElementById('scanBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
         const powerOffBtn = document.getElementById('powerOffBtn');
+        const trainingBtn = document.getElementById('trainingBtn');
         const statusText = document.getElementById('statusText');
         const deviceNameEl = document.getElementById('deviceName');
         const deviceNameContainer = document.getElementById('deviceNameContainer');
         const logBox = document.getElementById('logBox');
         const rxDataBox = document.getElementById('rxDataBox');
-        const clearDataBtn = document.getElementById('clearDataBtn');
         
         // 圖表與氣壓顯示相關元素
         const pressureText = document.getElementById('pressureText');
         const timeRangeSelect = document.getElementById('timeRangeSelect');
+        const targetIcon = document.getElementById('targetIcon');
+
+        // 語音合成引擎
+        const synth = window.speechSynthesis;
 
         let bluetoothDevice = null;
         let chartInstance = null;
-        let pressureDataPoints = []; // 存放 {x: timestamp, y: value} 供圖表使用
+        let pressureDataPoints = []; 
+        
+        // 校正相關變數
+        let isCalibrating = false;
+        let isReady = false; // 是否已完成5秒校正
+        let calibrationStartTime = 0;
+        let calibrationValues = [];
+        let basePressure = 0;
+
+        // 訓練處方相關變數
+        let isTraining = false;
+        let trainingPhase = 'IDLE'; // 'INHALE' or 'EXHALE'
+        let hasReachedTarget = false;
+        let targetLineValue = null;
+        let trainingTimeout = null;
 
         // --- 初始化 Chart.js ---
         function initChart() {
@@ -108,30 +161,42 @@
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    datasets: [{
-                        label: '氣壓 (hPA)',
-                        data: pressureDataPoints,
-                        borderColor: '#2563eb', // Tailwind blue-600
-                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        fill: true,
-                        tension: 0.1
-                    }]
+                    datasets: [
+                        {
+                            label: '氣壓',
+                            data: pressureDataPoints,
+                            borderColor: '#2563eb', // Tailwind blue-600
+                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: true,
+                            tension: 0.1
+                        },
+                        {
+                            label: '目標線',
+                            data: [],
+                            borderColor: '#ef4444', // Tailwind red-500
+                            borderDash: [5, 5],
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    animation: false, // 關閉動畫以應付 10Hz 高頻率更新，提升效能
+                    animation: false, 
+                    plugins: {
+                        legend: { display: false } // 隱藏圖例說明
+                    },
                     scales: {
                         x: {
                             type: 'linear',
-                            display: false // 隱藏 X 軸數值，以相對時間滾動顯示
+                            display: false 
                         },
                         y: {
-                            // 預設縮放範圍，會根據數據自動調整
-                            suggestedMin: 1000,
-                            suggestedMax: 1020
+                            // 移除 suggestedMin / suggestedMax，讓圖表 Y 軸根據資料全自動縮放
                         }
                     }
                 }
@@ -139,7 +204,7 @@
         }
         initChart();
 
-        clearDataBtn.addEventListener('click', () => { rxDataBox.innerHTML = ''; });
+        document.getElementById('clearLogBtn').addEventListener('click', () => { logBox.innerHTML = ''; });
 
         scanBtn.addEventListener('click', async () => {
             try {
@@ -170,16 +235,16 @@
 
                 // --- 2. 連線後立即發送 10Hz 頻率設定指令 ---
                 const freqConfig = new Uint8Array([0x12, 0x05, 0xFF, 0x00, 0x04, 0x0A, 0x01, 0x03, 0x05, 0x12, 0x00]);
-                log('正在設定裝置回傳頻率為 10Hz...', 'info');
+                log('設定回傳頻率為 10Hz...', 'info');
                 await sendByteArray(server, freqConfig);
 
-                // --- 3. 設定 5 秒後自動傳送指令 0x29 ---
-                log('已排程：5 秒後傳送指令 0x29...', 'info');
+                // --- 3. 設定連線 2 秒後自動傳送指令 0x29 ---
+                log('已排程：2 秒後傳送指令 0x29...', 'info');
                 setTimeout(async () => {
                     if (bluetoothDevice && bluetoothDevice.gatt.connected) {
                         await sendByteArray(server, new Uint8Array([0x29]));
                     }
-                }, 5000);
+                }, 2000);
 
             } catch (error) {
                 log(`連線失敗: ${error.message}`, 'error');
@@ -201,100 +266,226 @@
         }
 
         // ==========================================
-        // 🚨 氣壓資料解析邏輯 (已依據 BLE解析.txt 實作) 🚨
+        // 氣壓資料解析邏輯
         // ==========================================
         function parsePressureData(dataView) {
-            // 檢查封包長度並確認開頭是否為 0x11
             if (dataView.byteLength < 7 || dataView.getUint8(0) !== 0x11) {
                 return null; 
             }
 
-            // 取出 ctl (数据订阅标识)
             let ctl = (dataView.getUint8(2) << 8) | dataView.getUint8(1);
             let L = 7;
 
-            // 依據 ctl 判斷前面有哪些資料，並向後推移指標 L
-            if ((ctl & 0x0001) !== 0) L += 6; // 加速度 (無重力)
-            if ((ctl & 0x0002) !== 0) L += 6; // 加速度 (含重力)
-            if ((ctl & 0x0004) !== 0) L += 6; // 角速度
-            if ((ctl & 0x0008) !== 0) L += 6; // 磁場
+            if ((ctl & 0x0001) !== 0) L += 6; 
+            if ((ctl & 0x0002) !== 0) L += 6; 
+            if ((ctl & 0x0004) !== 0) L += 6; 
+            if ((ctl & 0x0008) !== 0) L += 6; 
 
-            // 判斷是否包含 溫度、氣壓、高度 (0x0010)
             if ((ctl & 0x0010) !== 0) {
-                // 確保封包長度足夠讀取 (Temp: 2 bytes, Pressure: 3 bytes)
                 if (L + 5 > dataView.byteLength) return null;
+                L += 2; 
 
-                L += 2; // 跳過溫度資料
-
-                // 讀取氣壓 (由3個 Byte 組成)
                 let b0 = dataView.getUint8(L);
                 let b1 = dataView.getUint8(L + 1);
                 let b2 = dataView.getUint8(L + 2);
                 let tmp32 = (b2 << 16) | (b1 << 8) | b0;
                 
-                // 若最高位(第24位)為1，代表負數，進行符號擴展補上 FF
                 if ((tmp32 & 0x800000) !== 0) {
                     tmp32 = tmp32 | 0xff000000;
                 }
 
-                // 大多數這類感測器直接輸出的氣壓單位為 Pa，因此除以 100 轉換為 hPa (百帕)
-                // (如果顯示的數值異常，例如小了 100 倍，請將此處改為 1.0)
+                // 依照使用者需求，指定倍率
                 let scaleAirPressure = 0.0002384185791; 
                 let hPaValue = tmp32 * scaleAirPressure;
 
                 return hPaValue;
             }
-
-            return null; // 若此封包不含氣壓資料
+            return null; 
         }
 
         function handleCharacteristicValueChanged(event) {
-            const value = event.target.value; // DataView 物件
+            const value = event.target.value; 
             let hexString = '';
-            
-            // 解析 Hex 字串
             for (let i = 0; i < value.byteLength; i++) {
-                const byte = value.getUint8(i);
-                hexString += byte.toString(16).padStart(2, '0').toUpperCase() + ' ';
+                hexString += value.getUint8(i).toString(16).padStart(2, '0').toUpperCase() + ' ';
             }
             
-            // --- 1. 取出氣壓並更新文字 ---
-            const pressureValue = parsePressureData(value);
+            // 顯示最新一筆資料
+            rxDataBox.innerHTML = `<div class="w-full truncate"><span class="text-xs text-slate-400">HEX:</span> <span class="tracking-widest text-blue-600 font-semibold ml-2">${hexString}</span></div>`;
+
+            // 取出氣壓並執行校正邏輯
+            const rawPressure = parsePressureData(value);
             
-            // 只有當該封包確實解析出氣壓時，才更新文字和圖表
-            if (pressureValue !== null) {
-                pressureText.textContent = `壓力 = ${pressureValue.toFixed(2)} hPA`;
-                
-                // --- 2. 更新即時圖表 ---
+            if (rawPressure !== null) {
                 const now = Date.now();
-                pressureDataPoints.push({ x: now, y: pressureValue });
-                
-                // 依據下拉選單過濾過舊的資料 (10s, 20s, 30s, 60s)
-                const timeWindow = parseInt(timeRangeSelect.value) * 1000;
-                const cutoffTime = now - timeWindow;
-                
-                while(pressureDataPoints.length > 0 && pressureDataPoints[0].x < cutoffTime) {
-                    pressureDataPoints.shift();
+
+                // 初始化 5 秒校正邏輯
+                if (!isCalibrating && !isReady) {
+                    isCalibrating = true;
+                    calibrationStartTime = now;
+                    calibrationValues.push(rawPressure);
+                    pressureText.textContent = `初始化...`;
+                } 
+                else if (isCalibrating) {
+                    calibrationValues.push(rawPressure);
+                    let elapsed = now - calibrationStartTime;
+                    let remaining = Math.ceil((5000 - elapsed) / 1000);
+                    
+                    if (remaining > 0) {
+                        pressureText.textContent = `初始化倒數: ${remaining}`;
+                    } else {
+                        // 校正完成
+                        let sum = calibrationValues.reduce((a, b) => a + b, 0);
+                        basePressure = sum / calibrationValues.length;
+                        isCalibrating = false;
+                        isReady = true;
+                        log(`校正完成，基準均值: ${basePressure.toFixed(4)} hPA`, 'success');
+                    }
+                } 
+                else if (isReady) {
+                    // 減去基準值之校正後壓力
+                    let adjustedPressure = rawPressure - basePressure;
+                    pressureText.textContent = `${adjustedPressure.toFixed(2)}`;
+                    
+                    // =====================================
+                    // 檢查訓練目標
+                    // =====================================
+                    if (isTraining && trainingPhase === 'INHALE' && !hasReachedTarget) {
+                        // 低氣壓目標，因此判斷是否小於等於目標值
+                        if (adjustedPressure <= targetLineValue) {
+                            hasReachedTarget = true;
+                            speak("好棒棒");
+                        }
+                    }
+
+                    // =====================================
+                    // 繪圖區更新
+                    // =====================================
+                    pressureDataPoints.push({ x: now, y: adjustedPressure });
+                    
+                    const timeWindow = parseInt(timeRangeSelect.value) * 1000;
+                    const cutoffTime = now - timeWindow;
+                    
+                    while(pressureDataPoints.length > 0 && pressureDataPoints[0].x < cutoffTime) {
+                        pressureDataPoints.shift();
+                    }
+
+                    chartInstance.options.scales.x.min = cutoffTime;
+                    chartInstance.options.scales.x.max = now;
+
+                    // 處理紅色的目標輔助線與定位點圖示
+                    if (isTraining && targetLineValue !== null) {
+                        chartInstance.data.datasets[1].data = [
+                            { x: cutoffTime, y: targetLineValue },
+                            { x: now, y: targetLineValue }
+                        ];
+
+                        // 將 HTML 圖示定位到目標線高度
+                        if (trainingPhase === 'INHALE') {
+                            const yPixel = chartInstance.scales.y.getPixelForValue(targetLineValue);
+                            // 確保取得有效的像素位置才顯示圖示
+                            if (!isNaN(yPixel)) {
+                                targetIcon.style.top = `${yPixel}px`;
+                                targetIcon.classList.remove('hidden');
+                            }
+                        } else {
+                            targetIcon.classList.add('hidden');
+                        }
+                    } else {
+                        chartInstance.data.datasets[1].data = [];
+                        targetIcon.classList.add('hidden');
+                    }
+                    
+                    chartInstance.update();
                 }
-                
-                // 維持圖表 X 軸為最近的秒數，形成滾動效果
-                chartInstance.options.scales.x.min = cutoffTime;
-                chartInstance.options.scales.x.max = now;
-                chartInstance.update();
+            }
+        }
+
+        // ==========================================
+        // 語音與訓練導引邏輯
+        // ==========================================
+        function speak(text) {
+            if (synth.speaking) {
+                synth.cancel(); // 若正在講話則打斷，保證語音即時性
+            }
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-TW'; // 設定為中文
+            utterance.rate = 1.1;     // 語速
+            utterance.pitch = 1.2;    // 稍微提高音調偏向女聲
+            synth.speak(utterance);
+        }
+
+        async function runTrainingCycle() {
+            if (!isTraining) return;
+
+            const inhaleTimeMs = parseFloat(document.getElementById('inhaleTime').value) * 1000;
+            const exhaleTimeMs = parseFloat(document.getElementById('exhaleTime').value) * 1000;
+            targetLineValue = parseFloat(document.getElementById('targetPressure').value);
+
+            // --- 吸氣階段 ---
+            trainingPhase = 'INHALE';
+            hasReachedTarget = false;
+            speak("吸氣");
+            
+            // 等待吸氣秒數
+            await new Promise(r => { trainingTimeout = setTimeout(r, inhaleTimeMs); });
+            if (!isTraining) return; // 若中途按了停止則跳出
+
+            // 若吸氣時間結束仍未達標
+            if (!hasReachedTarget) {
+                speak("加油");
             }
 
-            // --- 3. 更新接收 Log 區塊 ---
-            // 為了避免 10Hz 導致網頁 DOM 卡頓，簡化這裡的輸出並且只保留 20 行
-            const dataRow = document.createElement('div');
-            dataRow.className = 'border-b border-slate-200 pb-1 last:border-0';
-            dataRow.innerHTML = `<span class="text-xs text-slate-400">Hex:</span> <span class="tracking-wider text-blue-600">${hexString}</span>`;
-            rxDataBox.appendChild(dataRow);
-            
-            while (rxDataBox.children.length > 20) {
-                rxDataBox.removeChild(rxDataBox.firstChild);
-            }
-            rxDataBox.scrollTop = rxDataBox.scrollHeight;
+            // --- 呼氣階段 ---
+            trainingPhase = 'EXHALE';
+            targetIcon.classList.add('hidden'); // 呼氣時隱藏圖示
+            speak("吐氣");
+
+            // 等待呼氣秒數
+            await new Promise(r => { trainingTimeout = setTimeout(r, exhaleTimeMs); });
+            if (!isTraining) return; // 若中途按了停止則跳出
+
+            // 無窮迴圈：自動進行下一次
+            runTrainingCycle();
         }
+
+        // 開始 / 停止訓練按鈕
+        trainingBtn.addEventListener('click', () => {
+            if (!isReady) {
+                alert("請先連線裝置，並等待 5 秒氣壓初始化完成後再開始訓練！");
+                return;
+            }
+
+            if (isTraining) {
+                // 停止訓練
+                isTraining = false;
+                clearTimeout(trainingTimeout);
+                synth.cancel(); // 停止講話
+                
+                trainingBtn.textContent = "開始導引訓練";
+                trainingBtn.classList.replace('bg-rose-600', 'bg-indigo-600');
+                trainingBtn.classList.replace('hover:bg-rose-700', 'hover:bg-indigo-700');
+                
+                targetLineValue = null;
+                targetIcon.classList.add('hidden');
+                chartInstance.data.datasets[1].data = [];
+                chartInstance.update();
+                log('已停止導引訓練', 'warning');
+            } else {
+                // 啟動訓練
+                isTraining = true;
+                trainingBtn.textContent = "停止導引訓練";
+                trainingBtn.classList.replace('bg-indigo-600', 'bg-rose-600');
+                trainingBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-rose-700');
+                log('啟動導引訓練', 'success');
+                
+                // 初次點擊時觸發無聲語音，解鎖瀏覽器安全限制
+                const unlockAudio = new SpeechSynthesisUtterance('');
+                synth.speak(unlockAudio);
+
+                runTrainingCycle();
+            }
+        });
 
         // 發送 Byte Array 指令的通用函式
         async function sendByteArray(server, uint8Array) {
@@ -323,6 +514,9 @@
 
         function onDisconnected() {
             log('裝置已中斷連線。', 'warning');
+            isCalibrating = false;
+            isReady = false;
+            if (isTraining) trainingBtn.click(); // 若斷線時正在訓練則自動停止
             updateUI(false);
         }
 
@@ -333,7 +527,7 @@
         function updateUI(isConnected, name = '') {
             if (isConnected) {
                 statusText.textContent = '已連線';
-                statusText.className = 'text-xl font-bold text-emerald-600';
+                statusText.className = 'text-lg font-bold text-emerald-600';
                 deviceNameContainer.classList.remove('hidden');
                 deviceNameEl.textContent = name;
                 scanBtn.classList.add('hidden');
@@ -341,17 +535,19 @@
                 powerOffBtn.classList.remove('hidden');
             } else {
                 statusText.textContent = '尚未連線';
-                statusText.className = 'text-xl font-bold text-slate-700';
+                statusText.className = 'text-lg font-bold text-slate-700';
                 deviceNameContainer.classList.add('hidden');
                 scanBtn.classList.remove('hidden');
                 disconnectBtn.classList.add('hidden');
                 powerOffBtn.classList.add('hidden');
+                pressureText.textContent = '--';
+                targetIcon.classList.add('hidden');
             }
         }
 
         function log(message, type = 'normal') {
             const p = document.createElement('p');
-            p.className = type === 'error' ? 'text-rose-400' : type === 'success' ? 'text-emerald-400' : type === 'warning' ? 'text-yellow-400' : 'text-green-400';
+            p.className = type === 'error' ? 'text-rose-400' : type === 'success' ? 'text-emerald-400' : type === 'warning' ? 'text-yellow-400' : 'text-slate-400';
             p.innerHTML = `> ${message}`;
             logBox.appendChild(p);
             logBox.scrollTop = logBox.scrollHeight;
